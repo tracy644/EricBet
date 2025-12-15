@@ -7,42 +7,27 @@ import datetime as dt
 # --- Configuration ---
 TARGET_DATE = "2026-07-04"
 STOCKS = [
-    # Updated AVGO starting price to 294.30
     {"ticker": "AVGO", "start_price": 294.30, "name": "Broadcom Inc."},
     {"ticker": "VTSAX", "start_price": 152.64, "name": "Vanguard Total Stock Market"},
 ]
 
 # --- Helper: Fetch Data with Caching ---
-# We use caching to minimize hitting Yahoo Finance too often.
-# Relying on 'curl-cffi' (installed via requirements.txt) to handle the connection.
 @st.cache_data(ttl=43200) 
 def fetch_stock_data(ticker):
     stock = yf.Ticker(ticker)
-    # Fetch 2 years of history for trend calculation
     hist = stock.history(period="2y")
     return hist
 
 def get_projection(hist, target_date_str):
-    """
-    Calculates a simple linear regression projection based on historical data.
-    """
     if hist.empty:
         return 0.0
-
-    # Prepare data for linear regression
-    hist = hist.copy() # Avoid SettingWithCopy warning
+    hist = hist.copy()
     hist['Date_Ordinal'] = hist.index.map(pd.Timestamp.toordinal)
-    
     X = hist['Date_Ordinal'].values.reshape(-1, 1)
     y = hist['Close'].values
-
-    # Calculate slope (m) and intercept (b) -> y = mx + b
     slope, intercept = np.polyfit(X.flatten(), y, 1)
-
-    # Predict for target date
     target_date = pd.to_datetime(target_date_str)
     target_ordinal = target_date.toordinal()
-    
     projected_price = (slope * target_ordinal) + intercept
     return projected_price
 
@@ -53,47 +38,85 @@ st.title("📈 AVGO vs VTSAX Tracker")
 st.write(f"Projection Target Date: **{TARGET_DATE}**")
 st.write("---")
 
-cols = st.columns(len(STOCKS))
+# 1. Fetch all data first so we can compare them
+stock_data_store = []
 
-for index, stock_info in enumerate(STOCKS):
-    ticker = stock_info["ticker"]
-    start_price = stock_info["start_price"]
-    
-    with cols[index]:
-        st.subheader(f"{ticker}")
-        st.caption(stock_info["name"])
-        
-        try:
-            # Use cached fetch function
-            hist_data = fetch_stock_data(ticker)
+for stock_info in STOCKS:
+    try:
+        hist = fetch_stock_data(stock_info["ticker"])
+        if not hist.empty:
+            current_price = hist['Close'].iloc[-1]
+            gain_pct = ((current_price - stock_info["start_price"]) / stock_info["start_price"]) * 100
             
-            if not hist_data.empty:
-                current_price = hist_data['Close'].iloc[-1]
-                
-                # Calculate Gain/Loss
-                gain_loss_amt = current_price - start_price
-                gain_loss_pct = (gain_loss_amt / start_price) * 100
-                
-                # Display Metrics
-                st.metric(
-                    label="Current Price",
-                    value=f"${current_price:.2f}",
-                    delta=f"{gain_loss_pct:.2f}% (Since ${start_price:.2f})"
-                )
-                
-                # Calculate Projection
-                projected_val = get_projection(hist_data, TARGET_DATE)
-                proj_gain_pct = ((projected_val - start_price) / start_price) * 100
-                
-                st.info(f"🔮 **July 4, 2026 Projection**")
-                st.write(f"Estimated Value: **${projected_val:.2f}**")
-                st.write(f"Implied Gain: **{proj_gain_pct:.1f}%**")
+            stock_data_store.append({
+                "ticker": stock_info["ticker"],
+                "name": stock_info["name"],
+                "start_price": stock_info["start_price"],
+                "current_price": current_price,
+                "gain_pct": gain_pct,
+                "history": hist
+            })
+    except Exception as e:
+        st.error(f"Error fetching {stock_info['ticker']}: {e}")
+
+# 2. Display the data in columns
+if len(stock_data_store) == 2:
+    cols = st.columns(2)
+    
+    # Get the gain percentages to compare
+    stock_a = stock_data_store[0] # AVGO
+    stock_b = stock_data_store[1] # VTSAX
+    
+    # Calculate "Price to Match" for Stock A (AVGO)
+    # Target Price = Start Price * (1 + Other_Stock_Gain_Decimal)
+    target_price_for_a = stock_a["start_price"] * (1 + (stock_b["gain_pct"] / 100))
+    
+    # Calculate "Price to Match" for Stock B (VTSAX)
+    target_price_for_b = stock_b["start_price"] * (1 + (stock_a["gain_pct"] / 100))
+    
+    # Store these targets back into the objects for easy access in the loop
+    stock_a["match_price"] = target_price_for_a
+    stock_a["other_ticker"] = stock_b["ticker"]
+    
+    stock_b["match_price"] = target_price_for_b
+    stock_b["other_ticker"] = stock_a["ticker"]
+
+    # Render the columns
+    for index, data in enumerate(stock_data_store):
+        with cols[index]:
+            st.subheader(f"{data['ticker']}")
+            st.caption(data['name'])
+            
+            # Metric
+            st.metric(
+                label="Current Price",
+                value=f"${data['current_price']:.2f}",
+                delta=f"{data['gain_pct']:.2f}% (Since ${data['start_price']:.2f})"
+            )
+            
+            # --- New Feature: Price to Match ---
+            st.markdown(f"**🎯 Price to Match {data['other_ticker']}:**")
+            
+            diff = data['match_price'] - data['current_price']
+            if diff > 0:
+                # We are behind, need to grow
+                st.write(f"Need to hit: **${data['match_price']:.2f}** (Up ${diff:.2f})")
             else:
-                st.error("No data found.")
-                
-        except Exception as e:
-            st.error(f"Error loading data: {e}")
-            st.caption("Try refreshing in a few minutes.")
+                # We are ahead
+                st.write(f"Already beating {data['other_ticker']}! (Equivalent: ${data['match_price']:.2f})")
+            
+            st.write("---")
+
+            # Projection
+            projected_val = get_projection(data['history'], TARGET_DATE)
+            proj_gain_pct = ((projected_val - data['start_price']) / data['start_price']) * 100
+            
+            st.info(f"🔮 **July 4, 2026 Projection**")
+            st.write(f"Estimated Value: **${projected_val:.2f}**")
+            st.write(f"Implied Gain: **{proj_gain_pct:.1f}%**")
+
+else:
+    st.warning("Could not load data for both stocks to perform comparison.")
 
 st.write("---")
 st.caption("Disclaimer: Projections are based on a linear regression of the last 2 years. Not financial advice.")
