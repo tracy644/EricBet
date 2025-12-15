@@ -2,7 +2,6 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
-import requests
 import datetime as dt
 
 # --- Configuration ---
@@ -12,22 +11,13 @@ STOCKS = [
     {"ticker": "VTSAX", "start_price": 152.64, "name": "Vanguard Total Stock Market"},
 ]
 
-# --- Helper: Create a Custom Session ---
-# This tricks Yahoo into thinking we are a Chrome browser, not a bot.
-def get_session():
-    session = requests.Session()
-    session.headers.update({
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    })
-    return session
-
 # --- Helper: Fetch Data with Caching ---
-# We use @st.cache_data so this runs only once every 12 hours (43200 seconds),
-# or until you clear the cache manually. This prevents the Rate Limit error.
+# We keep the caching to minimize how often we ask Yahoo for data.
+# We REMOVED the manual session. We are relying on 'curl-cffi' (in requirements.txt)
+# to handle the browser impersonation automatically behind the scenes.
 @st.cache_data(ttl=43200) 
 def fetch_stock_data(ticker):
-    session = get_session()
-    stock = yf.Ticker(ticker, session=session)
+    stock = yf.Ticker(ticker)
     # Fetch 2 years of history
     hist = stock.history(period="2y")
     return hist
@@ -108,7 +98,6 @@ for index, stock_info in enumerate(STOCKS):
 st.write("---")
 st.caption("Disclaimer: Projections are based on a linear regression of the last 2 years. Not financial advice.")
 
-# Button to force a clear of the cache if you really need fresh data
 if st.button("Force Refresh Data"):
     st.cache_data.clear()
     st.rerun()
