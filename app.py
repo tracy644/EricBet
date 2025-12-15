@@ -32,8 +32,10 @@ def get_projection(hist, target_date_str):
     return projected_price
 
 # --- Streamlit App Layout ---
-st.set_page_config(page_title="Stock Tracker & Projection", page_icon="📈")
+st.set_page_config(page_title="Tracy vs Eric", page_icon="🍺")
 
+# --- NEW HEADLINE HERE ---
+st.header("Tracy VS Eric- One Beer to Rule Them All 🍺")
 st.title("📈 AVGO vs VTSAX Tracker")
 st.write(f"Projection Target Date: **{TARGET_DATE}**")
 st.write("---")
@@ -94,11 +96,15 @@ if len(stock_data_store) == 2:
                 delta=f"{data['gain_pct']:.2f}% (Since ${data['start_price']:.2f})"
             )
             
-            # --- New Feature: Price to Match ---
+            # --- Price to Match Logic ---
             st.markdown(f"**🎯 Price to Match {data['other_ticker']}:**")
             
             diff = data['match_price'] - data['current_price']
-            if diff > 0:
+            
+            # If the difference is extremely small (penny rounding), consider it a tie
+            if abs(diff) < 0.01:
+                 st.write(f"It's a dead heat! 🍺")
+            elif diff > 0:
                 # We are behind, need to grow
                 st.write(f"Need to hit: **${data['match_price']:.2f}** (Up ${diff:.2f})")
             else:
