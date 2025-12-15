@@ -7,18 +7,18 @@ import datetime as dt
 # --- Configuration ---
 TARGET_DATE = "2026-07-04"
 STOCKS = [
-    {"ticker": "AVGO", "start_price": 369.56, "name": "Broadcom Inc."},
+    # Updated AVGO starting price to 294.30
+    {"ticker": "AVGO", "start_price": 294.30, "name": "Broadcom Inc."},
     {"ticker": "VTSAX", "start_price": 152.64, "name": "Vanguard Total Stock Market"},
 ]
 
 # --- Helper: Fetch Data with Caching ---
-# We keep the caching to minimize how often we ask Yahoo for data.
-# We REMOVED the manual session. We are relying on 'curl-cffi' (in requirements.txt)
-# to handle the browser impersonation automatically behind the scenes.
+# We use caching to minimize hitting Yahoo Finance too often.
+# Relying on 'curl-cffi' (installed via requirements.txt) to handle the connection.
 @st.cache_data(ttl=43200) 
 def fetch_stock_data(ticker):
     stock = yf.Ticker(ticker)
-    # Fetch 2 years of history
+    # Fetch 2 years of history for trend calculation
     hist = stock.history(period="2y")
     return hist
 
@@ -64,7 +64,7 @@ for index, stock_info in enumerate(STOCKS):
         st.caption(stock_info["name"])
         
         try:
-            # use our cached fetch function
+            # Use cached fetch function
             hist_data = fetch_stock_data(ticker)
             
             if not hist_data.empty:
@@ -78,7 +78,7 @@ for index, stock_info in enumerate(STOCKS):
                 st.metric(
                     label="Current Price",
                     value=f"${current_price:.2f}",
-                    delta=f"{gain_loss_pct:.2f}% (Since ${start_price})"
+                    delta=f"{gain_loss_pct:.2f}% (Since ${start_price:.2f})"
                 )
                 
                 # Calculate Projection
