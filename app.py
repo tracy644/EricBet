@@ -15,9 +15,22 @@ STOCKS = [
 @st.cache_data(ttl=43200) 
 def fetch_stock_data(ticker):
     stock = yf.Ticker(ticker)
-    # Fetch 2 years to get trend lines and ensure we have previous day data
+    
+    # 1. Get Historical Data (for the chart/projection)
     hist = stock.history(period="2y")
-    return hist
+    
+    # 2. Get the REAL latest price (more accurate for Mutual Funds like VTSAX)
+    # fast_info is often more up-to-date than the last row of the dataframe
+    try:
+        latest_price = stock.fast_info['last_price']
+    except:
+        # Fallback if fast_info fails
+        if not hist.empty:
+            latest_price = hist['Close'].iloc[-1]
+        else:
+            latest_price = 0.0
+
+    return hist, latest_price
 
 def get_projection(hist, target_date_str):
     if hist.empty:
@@ -45,17 +58,36 @@ stock_data_store = []
 
 for stock_info in STOCKS:
     try:
-        hist = fetch_stock_data(stock_info["ticker"])
+        # Now fetching both the history AND the explicit latest price
+        hist, current_price = fetch_stock_data(stock_info["ticker"])
         
-        # We need at least 2 rows to calculate "Previous Close"
-        if not hist.empty and len(hist) >= 2:
-            current_price = hist['Close'].iloc[-1]
-            prev_close = hist['Close'].iloc[-2]
+        if not hist.empty and current_price > 0:
+            # We use the explicit 'current_price' for calculations, 
+            # but 'hist' for the projection and previous close.
             
-            # Overall Gain (Since start of bet)
+            # Safe way to get previous close (2nd to last row)
+            if len(hist) >= 2:
+                prev_close = hist['Close'].iloc[-2]
+                
+                # EDGE CASE: If VTSAX hasn't updated its history file yet, 
+                # the "latest price" might be from today, but the history file only has yesterday.
+                # We check if 'current_price' is basically the same as the last history row.
+                last_hist_price = hist['Close'].iloc[-1]
+                
+                # If the fast_info price is different from the last history price, 
+                # it means fast_info is NEWER. So use the last history price as "previous close".
+                if abs(current_price - last_hist_price) > 0.01:
+                    prev_close = last_hist_price
+                else:
+                    # If they are the same, go back one more day
+                    prev_close = hist['Close'].iloc[-2]
+            else:
+                prev_close = current_price # Fallback
+
+            # Overall Gain
             total_gain_pct = ((current_price - stock_info["start_price"]) / stock_info["start_price"]) * 100
             
-            # Daily Gain (Since yesterday close)
+            # Daily Gain
             daily_change_amt = current_price - prev_close
             daily_change_pct = ((current_price - prev_close) / prev_close) * 100
             
@@ -93,15 +125,14 @@ if len(stock_data_store) == 2:
             st.subheader(f"{data['ticker']}")
             st.caption(data['name'])
             
-            # Main Metric: Current Price & Total Gain
+            # Main Metric
             st.metric(
                 label="Current Price",
                 value=f"${data['current_price']:.2f}",
                 delta=f"{data['total_gain_pct']:.2f}% (Total Gain)"
             )
             
-            # Secondary Metric: Daily Movement
-            # We color it manually to show clearly
+            # Daily Movement
             daily_color = "green" if data['daily_change_pct'] >= 0 else "red"
             st.markdown(
                 f"**Today's Move:** <span style='color:{daily_color}'>"
@@ -111,7 +142,7 @@ if len(stock_data_store) == 2:
             
             st.write("---")
             
-            # --- Price to Match Logic ---
+            # Price to Match
             st.markdown(f"**🎯 Price to Match {data['other_ticker']}:**")
             diff = data['match_price'] - data['current_price']
             
@@ -132,11 +163,10 @@ if len(stock_data_store) == 2:
             st.write(f"Est. Value: **${projected_val:.2f}**")
             st.write(f"Est. Gain: **{proj_gain_pct:.1f}%**")
 
-    # --- NEW SECTION: DAILY BATTLE SUMMARY ---
+    # --- DAILY BATTLE SUMMARY ---
     st.write("---")
     st.subheader("⚔️ Today's Battle Report")
     
-    # Compare daily percentages
     daily_diff = stock_a['daily_change_pct'] - stock_b['daily_change_pct']
     
     if abs(daily_diff) < 0.01:
